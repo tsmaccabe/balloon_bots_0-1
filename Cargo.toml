@@ -1,0 +1,11 @@
+[package]
+name = "balloon_bots_0-1"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+kiss3d = "0.35.0"
+rapier2d = "0.26.1"
+
+[profile.dev.package.rapier3d]
+opt-level = 3

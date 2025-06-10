@@ -74,6 +74,29 @@ fn value(t: f32, rhythm: Rhythm) -> f32 {
     rhythm.amplitude * angle(t, rhythm).sin()
 }
 
+
+#[derive(Clone)]
+struct SensorValues {
+    vec: Vec<f32>,
+}
+
+#[derive(Clone)]
+struct ActuatorValues {
+    vec: Vec<f32>,
+}
+
+#[derive(Clone)]
+struct Policy {
+    inputs: SensorValues,
+    outputs: ActuatorValues,
+}
+
+impl Policy {
+    fn eval_output(&self) {
+        
+    }
+}
+
 #[derive(Clone)]
 struct Ranger {
     origin: Point<f32>,
@@ -123,14 +146,14 @@ fn local_to_world_position(origin: Point<f32>, angle: f32, position: Point<f32>)
     let angle_sin = angle.sin();
     let angle_cos = angle.cos();
     let rotated: rna::OPoint<f32, nalgebra::Const<2>> = Matrix::new(angle_cos, -angle_sin, angle_sin, angle_cos) * position;
-    point![rotated.x + origin.x, rotated.y + origin.y]
+    rna::point![rotated.x + origin.x, rotated.y + origin.y]
 }
 
 fn local_to_world_dir(angle: f32, dir: Vector<f32>) -> Point<f32> {
     let angle_sin = angle.sin();
     let angle_cos = angle.cos();
     let rotated = Matrix::new(angle_cos, -angle_sin, angle_sin, angle_cos) * dir;
-    point![rotated.x, rotated.y]
+    rna::point![rotated.x, rotated.y]
 }
 
 fn unwrap_joint_and_set_motor_position(joint_set: &mut ImpulseJointSet, joint: &mut Hinge, angle_position: f32) {
@@ -247,8 +270,6 @@ fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut ki
     let body_rb = rigid_body_set.get(body.head.handle).unwrap();
     body_rb.translation().x
 }
-
-struct Policy {}
 
 fn make_reward_fn(mut scene_window: &mut Window, cam: kiss3d::camera::FirstPerson, rigid_body_set: RigidBodySet, collider_set: ColliderSet, joint_set: ImpulseJointSet, body: Body, body_visual: &mut RigidBodyVisual, body_radius: f32, num_frames: u32, gravity: rna::Vector2<f32>, sensor_rangers: Vec<Ranger>) -> impl FnMut(Policy) -> f32 {
     move |behavior_policy| simulate(behavior_policy, &mut scene_window, &mut cam.clone(), rigid_body_set.clone(), collider_set.clone(), joint_set.clone(), &mut body.clone(), &mut body_visual.clone(), body_radius, num_frames, gravity, sensor_rangers.clone())
@@ -437,6 +458,8 @@ fn main() {
 
     let mut head_visual = RigidBodyVisual{handle: body.head.handle, node: head_node};
 
+    let policy = Policy{};
+
     /* Create other structures necessary for the simulation. */
-    simulate(scene_window, &mut cam, rigid_body_set, collider_set, joint_set, &mut body, &mut head_visual, head_radius, 10000, rna::vector![0.0, -98.1], sensor_rangers);
+    simulate(policy, &mut scene_window, &mut cam, rigid_body_set, collider_set, joint_set, &mut body, &mut head_visual, head_radius, 10000, rna::vector![0.0, -98.1], sensor_rangers);
 }

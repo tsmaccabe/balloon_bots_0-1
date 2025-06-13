@@ -31,10 +31,6 @@ struct LegRhythm {
     knee2_rhythm: Rhythm,
 }
 
-enum ActuatorParams {
-    LegRhythmParams
-}
-
 #[derive(PartialEq, Eq, Hash, Clone)]
 struct LegRhythmParams {
     hip1_amplitude: i32,
@@ -67,10 +63,6 @@ struct LegRhythmAction {
     knee2_phase: i32,
 }
 
-enum Actions {
-    LegRhythmParams
-}
-
 impl LegRhythmAction {
     fn new_zeros() -> Self {
         Self { hip1_amplitude: 0, hip1_frequency: 0, hip1_phase: 0, hip2_amplitude: 0, hip2_frequency: 0, hip2_phase: 0, knee1_amplitude: 0, knee1_frequency: 0, knee1_phase: 0, knee2_amplitude: 0, knee2_frequency: 0, knee2_phase: 0 }
@@ -96,54 +88,128 @@ fn value(t: f32, rhythm: Rhythm) -> f32 {
     rhythm.amplitude * angle(t, rhythm).sin()
 }
 
+
+#[derive(PartialEq, Eq, Hash, Clone)]
 enum SensorSetKind {
     GlobalTranslation,
     RangerSet,
     JointAngleSet,
 }
 
-struct GlobalTranslation {
-    values: rna::Point2<f32>
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct SensorValues {
+    kind: SensorSetKind,
+    values: Vec<i32>,
+    increment_scale: i32,
 }
 
-struct RangerSet {
-    values: Vec<f32>
-}
-
-struct JointAngleSet {
-    values: Vec<f32>
-}
-
-impl GlobalTranslation {
-    fn new(values: rna::Point2<f32>) -> Self {
-        Self {values}
+impl SensorValues {
+    fn new(kind: SensorSetKind, values: Vec<i32>, increment_scale: i32,) -> Self {
+        Self {kind, values: values, increment_scale}
     }
 }
 
-impl RangerSet {
-    fn new_zeros(len: usize) -> Self {
-        Self {values: vec![0.; len]}
+impl SensorValues {
+    fn new_zeros(kind: SensorSetKind, len: usize, increment_scale: i32,) -> Self {
+        Self {kind, values: vec![0; len], increment_scale}
     }
 }
 
-impl JointAngleSet {
-
-}
-
-enum SensorSuiteKind{
+#[derive(PartialEq, Eq, Hash, Clone)]
+enum SensorSuite{
     BalloonBotSensorSuite,
 }
 
-struct SensorSuite {
-    kind: SensorSuiteKind,
-    position: SensorSet,
-    rangers: SensorSet,
-    joints: SensorSet,
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct BalloonBotSensorSuite {
+    position_int: SensorValues,
+    rangers_int: SensorValues,
+    joints_int: SensorValues,
+    angle_scale: i32,
+    angle_precision: i32,
+    translation_scale: i32,
+    translation_precision: i32,
+}
+
+impl BalloonBotSensorSuite {
+    fn sensor_values_balloon_bot(position: rna::Point2<f32>, rangers: Vec<rna::Point2<f32>>, joints: Vec<f32>, angle_scale: i32, angle_precision: i32, translation_scale: i32, translation_precision: i32) -> Self {
+        let translation_sensor = SensorValues::new(SensorSetKind::GlobalTranslation, 
+            vec![position.x*translation_scale, position.y],
+            translation_scale.
+        );
+        let rangers_sensor = SensorValues::new_zeros(SensorSetKind::RangerSet, 
+            6,
+            translation_scale,
+            translation_scale,
+        );
+        let joints_sensor = SensorValues::new_zeros(SensorSetKind::JointAngleSet, 
+            6,
+            angle_scale,
+            angle_increment_scale,
+        );
+        Self {position_int: translation_sensor, rangers_int: rangers_sensor, joints_int: joints_sensor, angle_increment_times_scale: angle_increment_int_times_scale, angle_increment_scale: angle_increment_scale, translation_increment_int_times_scale: translation_increment_int_times_scale, translation_increment_scale: translation_increment_scale}
+    }
+}
+
+impl BalloonBotSensorSuite {
+    fn new_zeros(angle_increment: f32, linear_increment: f32) -> Self {
+        BalloonBotSensorSuite::sensor_values_balloon_bot(SensorValues::new,(angle_increment/10000.).round() as i32, rna::Point2::new(0, 0))
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+enum ActuatorValues {
+    BalloonBotActuators,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct BalloonBotActuatorValues {
+    motors: LegRhythmParams,
+    angle_increment_divby_piover100: i32,
+}
+
+impl BalloonBotActuatorValues {
+    fn actuator_values_balloon_bot(motors: LegRhythmParams, angle_increment_divby_piover100: i32) -> Self {
+        Self {motors, angle_increment_divby_piover100}
+    }
+}
+
+impl BalloonBotActuatorValues {
+    fn new_zeros(angle_increment: f32) -> Self {
+        BalloonBotActuatorValues::actuator_values_balloon_bot(LegRhythmParams::new_zeros(), ((angle_increment*100./PI)).round() as i32)
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+enum StateParamsKind {
+    BalloonBotParams,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct StateParams {
+    kind: StateParamsKind,
+    actuators: BalloonBotActuatorValues,
+    sensors: BalloonBotSensorValues,
 }
 
 
-fn make_policy(sensors: SensorSuite, parameters: LegRhythmParams, ) -> () {
+#[derive(PartialEq, Eq, Hash, Clone)]
+enum PolicyKind {
+    BalloonBotPolicy,
+}
 
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct Policy {
+    kind: PolicyKind,
+    inputs: SensorSuite,
+    outputs: ActuatorValues,
+    parameters: StateParams,
+}
+
+impl Policy {
+    fn eval_output(&self) {
+        
+    }
 }
 
 #[derive(Clone)]

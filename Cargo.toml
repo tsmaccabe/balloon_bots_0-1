@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 kiss3d = "0.35.0"
 rapier2d = "0.26.1"
+rurel = "0.6.0"
 
 [profile.dev.package.rapier3d]
 opt-level = 3

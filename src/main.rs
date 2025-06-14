@@ -96,10 +96,10 @@ fn value(t: f32, rhythm: Rhythm) -> f32 {
     rhythm.amplitude * angle(t, rhythm).sin()
 }
 
-enum SensorSetKind {
-    GlobalTranslation,
-    RangerSet,
-    JointAngleSet,
+enum SensorSet {
+    GlobalTranslationSet(rna::Point2<f32>),
+    RangerSet(Vec<f32>),
+    JointAngleSet(Vec<f32>),
 }
 
 struct GlobalTranslation {
@@ -118,6 +118,9 @@ impl GlobalTranslation {
     fn new(values: rna::Point2<f32>) -> Self {
         Self {values}
     }
+    fn new_from_body(rigid_body: RigidBody) -> Self {
+        Self {values: rna::point![rigid_body.translation().x, rigid_body.translation().y]}
+    }
 }
 
 impl RangerSet {
@@ -126,8 +129,16 @@ impl RangerSet {
     }
 }
 
-impl JointAngleSet {
+impl RangerSet {
+    fn new(values: Vec<f32>) -> Self {
+        Self {values}
+    }
+}
 
+impl JointAngleSet {
+    fn new(values: Vec<f32>) -> Self {
+        Self {values}
+    }
 }
 
 enum SensorSuiteKind{
@@ -141,7 +152,6 @@ struct SensorSuite {
     joints: SensorSet,
 }
 
-
 fn make_policy(sensors: SensorSuite, parameters: LegRhythmParams, ) -> () {
 
 }
@@ -150,6 +160,21 @@ fn make_policy(sensors: SensorSuite, parameters: LegRhythmParams, ) -> () {
 struct Ranger {
     origin: Point<f32>,
     dir: rna::Vector2<f32>,
+}
+
+impl Ranger {
+    fn ray_length(&self, ray: Ray, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet) -> f32 {
+        query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap().1
+    }
+}
+
+impl Ranger {
+    fn new_from_rangers(&self, ray: Ray, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet) -> f32 {
+        
+        
+        let cast_result = query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap();
+        cast_result.1
+    }
 }
 
 #[derive(Clone)]
@@ -305,6 +330,8 @@ fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut ki
             ray_length = cast_result.1;
         };
         let ray_hit = rna::Point2::new(ray_start_world.x + ray_length * ray_dir_world.x, ray_start_world.y + ray_length * ray_dir_world.y);
+
+        ray_length = 
 
         let kiss3d_ray_start_world: kna::OPoint<f32, kna::Const<3>> = kna::Point3::new(ray_start_world.x, ray_start_world.y, 0.);
         let kiss3d_ray_target_world: kna::OPoint<f32, kna::Const<3>> = kna::Point3::new(ray_hit.x, ray_hit.y, 0.);

@@ -16,6 +16,12 @@ struct MyState { leg1_amplitude: f32, leg1_frequency: f32 , leg1_phase: f32}
 #[derive(PartialEq, Eq, Hash, Clone)]
 struct MyAction { dx: i32, dy: i32 }*/
 
+#[derive(Clone)]
+struct LocalCoordFrame {
+    origin: rna::Point2<f32>,
+    angle: f32,
+}
+
 #[derive(PartialEq)]
 struct Rhythm {
     amplitude: f32,
@@ -96,70 +102,85 @@ fn rhythm_value(t: f32, rhythm: Rhythm) -> f32 {
     rhythm.amplitude * rhythm_angle(t, rhythm).sin()
 }
 
-fn ray_local(ranger: &Ranger, coord_sys_origin: rna::Point2<f32>, coord_sys_angle: f32) -> (Ray, rna::Point2<f32>, f32) {
-    let ray_origin_world = local_to_world_position(coord_sys_origin, coord_sys_angle, ranger.ray_local_origin);
-    let ray_angle_world = coord_sys_angle + ranger.ray_local_angle;
+fn ray_local(ranger: &Ranger, frame: &LocalCoordFrame) -> (Ray, rna::Point2<f32>, f32) {
+    let ray_origin_world = local_to_world_position(frame.origin, frame.angle, ranger.ray_local_origin);
+    let ray_angle_world = frame.angle + ranger.ray_local_angle;
     (Ray::new(ray_origin_world, rna::vector![ray_angle_world.cos(), ray_angle_world.sin()]), ray_origin_world, ray_angle_world)
 }
 
 #[derive(Clone)]
-struct Ranger<'a> {
+struct Ranger {
     /* `ray_local_origin` and `ray_local_angle` are in local coordinates. */
-    coord_sys_body: &'a RigidBody,
+    frame: LocalCoordFrame,
     ray_local_origin: Point<f32>,
     ray_local_angle: f32,
     range: f32,
 }
 
-impl<'a> Ranger<'a> {
-    fn ray_trace(&self, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet, coord_sys_origin: rna::Point2<f32>, coord_sys_angle: f32) -> (ColliderHandle, f32, f32) {
-        let (ray, _, ray_angle_world) = ray_local(self, coord_sys_origin, coord_sys_angle);
+impl Ranger {
+    fn ray_trace(&self, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet, frame: &LocalCoordFrame) -> (ColliderHandle, f32, f32) {
+        let (ray, _, ray_angle_world) = ray_local(self, frame);
         (query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap().0,
         query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap().1,
         ray_angle_world)
     }
     
-    fn new(coord_sys_body_handle: &'a RigidBodyHandle, query_pipeline: &mut QueryPipeline, rigid_bodies: &'a RigidBodySet, colliders: &ColliderSet, ray_local_origin: Point<f32>, ray_local_angle: f32) -> Self {
-        let coord_sys_body = rigid_bodies.get(*coord_sys_body_handle).unwrap();
-        let coord_sys_origin = rna::point![coord_sys_body.translation().x, coord_sys_body.translation().y];
-        let coord_sys_angle = coord_sys_body.rotation().angle();
-        let mut ranger = Self{coord_sys_body: &coord_sys_body, ray_local_origin, ray_local_angle, range: 0.};
-        let (_, range, _) = Ranger::ray_trace(&ranger, query_pipeline, rigid_bodies, colliders, coord_sys_origin, coord_sys_angle);
+    fn new(query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet, ray_local_origin: Point<f32>, ray_local_angle: f32, frame: LocalCoordFrame) -> Self {
+        let mut ranger = Self{frame: frame.clone(), ray_local_origin, ray_local_angle, range: 0.};
+        let (_, range, _) = Ranger::ray_trace(&ranger, query_pipeline, rigid_bodies, colliders, &frame);
         ranger.range = range;
         ranger
     }
 }
 
 #[derive(Clone)]
-struct Gps<'a> {
-    /* `origin` and `dir_x` are in world coordinates. */
-    coord_sys_body: &'a RigidBody,
-    origin: Point<f32>,
-    dir_x: rna::Vector2<f32>,
-}
-
-impl<'a> Gps<'a> {
-    fn new(coord_sys_body: &'a RigidBody) -> Self {
-        Self {coord_sys_body, origin: rna::point![coord_sys_body.translation().x, coord_sys_body.translation().y], dir_x: rna::vector![coord_sys_body.rotation().cos_angle(), coord_sys_body.rotation().sin_angle()]}
-    }
-
-    fn update(&mut self, coord_sys_body: &'a RigidBody) {
-        self.origin = rna::point![coord_sys_body.translation().x, coord_sys_body.translation().y];
-        self.dir_x = rna::vector![coord_sys_body.rotation().cos_angle(), coord_sys_body.rotation().sin_angle()];
-    }
-}
-
-#[derive(Clone)]
-struct Angler<'a> {
-    /* `angle` is the counterclockwise angle of its associated joint. */
-    joint: &'a ImpulseJoint,
+struct Gps {
+    /* `origin` and `angle` are in world coordinates. */
+    tracked_body_handle: RigidBodyHandle,
+    position: rna::Point2<f32>,
     angle: f32,
 }
 
-struct SensorSuite<'a> {
-    gps: Gps<'a>,
-    rangers: Vec<Ranger<'a>>,
-    anglers: Vec<Angler<'a>>,
+impl Gps {
+    fn new(tracked_body_handle: RigidBodyHandle, rigid_bodies: &RigidBodySet) -> Self {
+        let tracked_body = rigid_bodies.get(tracked_body_handle).unwrap();
+        Self {tracked_body_handle, position: rna::point![tracked_body.translation().x, tracked_body.translation().y], angle: tracked_body.rotation().angle()}
+    }
+
+    fn update(&mut self, tracked_body_handle: &RigidBodyHandle, rigid_bodies: &RigidBodySet) {
+        let tracked_body = rigid_bodies.get(*tracked_body_handle).unwrap();
+        self.position = rna::point![tracked_body.translation().x, tracked_body.translation().y];
+        self.angle = tracked_body.rotation().angle();
+    }
+}
+
+fn get_joint_angle(joint: &ImpulseJoint, rigid_bodies: &RigidBodySet) -> f32 {
+    let rb_rot1 = rigid_bodies.get(joint.body1).unwrap().rotation();
+    let rb_rot2 = rigid_bodies.get(joint.body2).unwrap().rotation();
+    joint.data.as_revolute().unwrap().angle(rb_rot1, rb_rot2)
+}
+
+#[derive(Clone)]
+struct Angler {
+    /* `angle` is the counterclockwise angle of its associated joint. */
+    joint_handle: ImpulseJointHandle,
+    angle: f32,
+}
+
+impl Angler {
+    fn new(joint_handle: ImpulseJointHandle, joints: &ImpulseJointSet, rigid_bodies: &RigidBodySet) -> Self {
+        Self {joint_handle: joint_handle, angle: get_joint_angle(joints.get(joint_handle).unwrap(), rigid_bodies)}
+    }
+    
+    fn update(&mut self, joints: &ImpulseJointSet, rigid_bodies: &RigidBodySet) {
+        self.angle = get_joint_angle(joints.get(self.joint_handle).unwrap(), rigid_bodies)
+    }
+}
+
+struct SensorSuite {
+    gps: Gps,
+    rangers: Vec<Ranger>,
+    anglers: Vec<Angler>,
 }
 
 fn make_policy(sensors: SensorSuite, parameters: LegRhythmParams, ) -> () {

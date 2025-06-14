@@ -88,93 +88,82 @@ fn value_discrete(t: f32, amplitude: i32, frequency: i32, phase: i32) -> f32 {
 
 }
  */
-fn angle(t: f32, rhythm: Rhythm) -> f32 {
+fn rhythm_angle(t: f32, rhythm: Rhythm) -> f32 {
     rhythm.frequency * t + rhythm.phase
 }
 
-fn value(t: f32, rhythm: Rhythm) -> f32 {
-    rhythm.amplitude * angle(t, rhythm).sin()
+fn rhythm_value(t: f32, rhythm: Rhythm) -> f32 {
+    rhythm.amplitude * rhythm_angle(t, rhythm).sin()
 }
 
-enum SensorSet {
-    GlobalTranslationSet(rna::Point2<f32>),
-    RangerSet(Vec<f32>),
-    JointAngleSet(Vec<f32>),
+fn ray_local(ranger: &Ranger, coord_sys_origin: rna::Point2<f32>, coord_sys_angle: f32) -> (Ray, rna::Point2<f32>, f32) {
+    let ray_origin_world = local_to_world_position(coord_sys_origin, coord_sys_angle, ranger.ray_local_origin);
+    let ray_angle_world = coord_sys_angle + ranger.ray_local_angle;
+    (Ray::new(ray_origin_world, rna::vector![ray_angle_world.cos(), ray_angle_world.sin()]), ray_origin_world, ray_angle_world)
 }
 
-struct GlobalTranslation {
-    values: rna::Point2<f32>
+#[derive(Clone)]
+struct Ranger<'a> {
+    /* `ray_local_origin` and `ray_local_angle` are in local coordinates. */
+    coord_sys_body: &'a RigidBody,
+    ray_local_origin: Point<f32>,
+    ray_local_angle: f32,
+    range: f32,
 }
 
-struct RangerSet {
-    values: Vec<f32>
-}
-
-struct JointAngleSet {
-    values: Vec<f32>
-}
-
-impl GlobalTranslation {
-    fn new(values: rna::Point2<f32>) -> Self {
-        Self {values}
+impl<'a> Ranger<'a> {
+    fn ray_trace(&self, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet, coord_sys_origin: rna::Point2<f32>, coord_sys_angle: f32) -> (ColliderHandle, f32, f32) {
+        let (ray, _, ray_angle_world) = ray_local(self, coord_sys_origin, coord_sys_angle);
+        (query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap().0,
+        query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap().1,
+        ray_angle_world)
     }
-    fn new_from_body(rigid_body: RigidBody) -> Self {
-        Self {values: rna::point![rigid_body.translation().x, rigid_body.translation().y]}
-    }
-}
-
-impl RangerSet {
-    fn new_zeros(len: usize) -> Self {
-        Self {values: vec![0.; len]}
-    }
-}
-
-impl RangerSet {
-    fn new(values: Vec<f32>) -> Self {
-        Self {values}
+    
+    fn new(coord_sys_body_handle: &'a RigidBodyHandle, query_pipeline: &mut QueryPipeline, rigid_bodies: &'a RigidBodySet, colliders: &ColliderSet, ray_local_origin: Point<f32>, ray_local_angle: f32) -> Self {
+        let coord_sys_body = rigid_bodies.get(*coord_sys_body_handle).unwrap();
+        let coord_sys_origin = rna::point![coord_sys_body.translation().x, coord_sys_body.translation().y];
+        let coord_sys_angle = coord_sys_body.rotation().angle();
+        let mut ranger = Self{coord_sys_body: &coord_sys_body, ray_local_origin, ray_local_angle, range: 0.};
+        let (_, range, _) = Ranger::ray_trace(&ranger, query_pipeline, rigid_bodies, colliders, coord_sys_origin, coord_sys_angle);
+        ranger.range = range;
+        ranger
     }
 }
 
-impl JointAngleSet {
-    fn new(values: Vec<f32>) -> Self {
-        Self {values}
+#[derive(Clone)]
+struct Gps<'a> {
+    /* `origin` and `dir_x` are in world coordinates. */
+    coord_sys_body: &'a RigidBody,
+    origin: Point<f32>,
+    dir_x: rna::Vector2<f32>,
+}
+
+impl<'a> Gps<'a> {
+    fn new(coord_sys_body: &'a RigidBody) -> Self {
+        Self {coord_sys_body, origin: rna::point![coord_sys_body.translation().x, coord_sys_body.translation().y], dir_x: rna::vector![coord_sys_body.rotation().cos_angle(), coord_sys_body.rotation().sin_angle()]}
+    }
+
+    fn update(&mut self, coord_sys_body: &'a RigidBody) {
+        self.origin = rna::point![coord_sys_body.translation().x, coord_sys_body.translation().y];
+        self.dir_x = rna::vector![coord_sys_body.rotation().cos_angle(), coord_sys_body.rotation().sin_angle()];
     }
 }
 
-enum SensorSuiteKind{
-    BalloonBotSensorSuite,
+#[derive(Clone)]
+struct Angler<'a> {
+    /* `angle` is the counterclockwise angle of its associated joint. */
+    joint: &'a ImpulseJoint,
+    angle: f32,
 }
 
-struct SensorSuite {
-    kind: SensorSuiteKind,
-    position: SensorSet,
-    rangers: SensorSet,
-    joints: SensorSet,
+struct SensorSuite<'a> {
+    gps: Gps<'a>,
+    rangers: Vec<Ranger<'a>>,
+    anglers: Vec<Angler<'a>>,
 }
 
 fn make_policy(sensors: SensorSuite, parameters: LegRhythmParams, ) -> () {
 
-}
-
-#[derive(Clone)]
-struct Ranger {
-    origin: Point<f32>,
-    dir: rna::Vector2<f32>,
-}
-
-impl Ranger {
-    fn ray_length(&self, ray: Ray, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet) -> f32 {
-        query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap().1
-    }
-}
-
-impl Ranger {
-    fn new_from_rangers(&self, ray: Ray, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet) -> f32 {
-        
-        
-        let cast_result = query_pipeline.cast_ray(rigid_bodies, colliders, &ray, 10000., true, QueryFilter::default()).unwrap();
-        cast_result.1
-    }
 }
 
 #[derive(Clone)]
@@ -192,6 +181,7 @@ struct Body {
 
 #[derive(Clone)]
 struct Head {
+    /* The robot's local coordinate system has `Head`'s origin and x-axis angle for sensor values. */
     handle: RigidBodyHandle,
     radius: f32,
 }
@@ -238,19 +228,12 @@ fn set_motor_position(joint_set: &mut ImpulseJointSet, joint: &mut Hinge, angle_
     }
 }
 
-fn draw_sensor_rays(scene_window: &mut Window, query_pipeline: &QueryPipeline, rigid_body_set: &RigidBodySet, collider_set: &ColliderSet, sensor_rangers: &Vec<Ranger>, local_origin: rna::Point2<f32>, local_frame_angle: f32) -> Vec<f32> {
+fn draw_sensor_rays(scene_window: &mut Window, query_pipeline: &mut QueryPipeline, rigid_bodies: &RigidBodySet, colliders: &ColliderSet, sensor_rangers: &Vec<Ranger>, coord_sys_origin: rna::Point2<f32>, coord_sys_angle: f32) -> Vec<f32> {
     let mut ranges: Vec<f32> = vec![0.; sensor_rangers.len()];
     for (i, ranger) in sensor_rangers.iter().enumerate() {
-        let ray_start_world = local_to_world_position(local_origin, local_frame_angle, ranger.origin);
-        let ray_dir_world = local_to_world_dir(local_frame_angle, ranger.dir);
-        let ray = Ray::new(ray_start_world, rna::vector![ray_dir_world.x, ray_dir_world.y]);
-
-        let filter = QueryFilter::default();
-        let mut ray_length = 0.;
-        if let Some(cast_result) = query_pipeline.cast_ray(&rigid_body_set, &collider_set, &ray, 10000., true, filter) {
-            ray_length = cast_result.1;
-        };
-        let ray_hit = rna::Point2::new(ray_start_world.x + ray_length * ray_dir_world.x, ray_start_world.y + ray_length * ray_dir_world.y);
+        let (_, ray_length, ray_angle_world) = ranger.ray_trace(query_pipeline, rigid_bodies, colliders, coord_sys_origin, coord_sys_angle);
+        let ray_start_world = rna::point![coord_sys_origin.x + ranger.ray_local_origin.x, coord_sys_origin.y + ranger.ray_local_origin.y];
+        let ray_hit = rna::Point2::new(ray_start_world.x + ray_length * ray_angle_world.cos(), ray_start_world.y + ray_length * ray_angle_world.sin());
 
         let kiss3d_ray_start_world: kna::OPoint<f32, kna::Const<3>> = kna::Point3::new(ray_start_world.x, ray_start_world.y, 0.);
         let kiss3d_ray_target_world: kna::OPoint<f32, kna::Const<3>> = kna::Point3::new(ray_hit.x, ray_hit.y, 0.);
@@ -263,7 +246,7 @@ fn draw_sensor_rays(scene_window: &mut Window, query_pipeline: &QueryPipeline, r
     ranges
 }
 
-fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut kiss3d::camera::FirstPerson, mut rigid_body_set: RigidBodySet, mut collider_set: ColliderSet, mut joint_set: ImpulseJointSet, mut body: &mut Body, body_visual: &mut RigidBodyVisual, body_radius: f32, num_frames: u32, gravity: rna::Vector2<f32>, sensor_rangers: Vec<Ranger>) -> f32 {
+fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut kiss3d::camera::FirstPerson, mut rigid_bodies: RigidBodySet, mut colliders: ColliderSet, mut joint_set: ImpulseJointSet, mut body: &mut Body, body_visual: &mut RigidBodyVisual, body_radius: f32, num_frames: u32, gravity: rna::Vector2<f32>, sensor_rangers: Vec<Ranger>) -> f32 {
     let integration_parameters = IntegrationParameters::default();
     let mut physics_pipeline = PhysicsPipeline::new();
     let mut island_manager = IslandManager::new();
@@ -284,8 +267,8 @@ fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut ki
             &mut island_manager,
             &mut broad_phase,
             &mut narrow_phase,
-            &mut rigid_body_set,
-            &mut collider_set,
+            &mut rigid_bodies,
+            &mut colliders,
             &mut joint_set,
             &mut multibody_joint_set,
             &mut ccd_solver,
@@ -296,7 +279,7 @@ fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut ki
 
         scene_window.render_with_camera(cam);
 
-        let body_rb = rigid_body_set.get_mut(body.head.handle).unwrap();
+        let body_rb = rigid_bodies.get_mut(body.head.handle).unwrap();
         body_rb.apply_impulse(rna::vector![0., 8. * body_radius.powf(2.)], true);
  
         set_motor_position(&mut joint_set, &mut body.legs.0.knee, -PI/6. - PI/8. * ((i as f32)*PI/30. - PI).sin());
@@ -308,7 +291,7 @@ fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut ki
 
         let body_rb_read = body_rb.clone();
 
-        draw_body(&mut scene_window, &rigid_body_set, &mut body, body_visual);
+        draw_body(&mut scene_window, &rigid_bodies, &mut body, body_visual);
 
         let left = kna::Point3::new(-1000., 0., 0.);
         let right = kna::Point3::new(1000., 0., 0.);
@@ -318,15 +301,15 @@ fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut ki
         let head_pos: nalgebra::OPoint<f32, nalgebra::Const<2>> = point![body_rb_read.translation().x, body_rb_read.translation().y];
         let head_angle = body_rb_read.rotation().angle();
 
-        draw_sensor_rays(&mut scene_window, &query_pipeline, &rigid_body_set, &collider_set, &sensor_rangers, head_pos, head_angle);
+        draw_sensor_rays(&mut scene_window, &query_pipeline, &rigid_bodies, &colliders, &sensor_rangers, head_pos, head_angle);
 
-        let ray_start_world = local_to_world_position(head_pos, head_angle, sensor_rangers[3].origin);
-        let ray_dir_world = local_to_world_dir(head_angle, sensor_rangers[3].dir);
-        let ray = Ray::new(ray_start_world, rna::vector![ray_dir_world.x, ray_dir_world.y]);
+        let ray_start_world = local_to_world_position(head_pos, head_angle, sensor_rangers[3].ray_local_origin);
+        let ray_angle_world = head_angle + sensor_rangers[3].ray_local_angle;
+        let ray = Ray::new(ray_start_world, rna::vector![ray_angle_world.cos(), ray_angle_world.sin()]);
 
         let filter = QueryFilter::default();
         let mut ray_length = 0.;
-        if let Some(cast_result) = query_pipeline.cast_ray(&rigid_body_set, &collider_set, &ray, 10000., true, filter) {
+        if let Some(cast_result) = query_pipeline.cast_ray(&rigid_bodies, &colliders, &ray, 10000., true, filter) {
             ray_length = cast_result.1;
         };
         let ray_hit = rna::Point2::new(ray_start_world.x + ray_length * ray_dir_world.x, ray_start_world.y + ray_length * ray_dir_world.y);
@@ -343,7 +326,7 @@ fn simulate(behavior_policy: Policy, mut scene_window: &mut Window, cam: &mut ki
         thread::sleep(Duration::from_millis(30));
     }
 
-    let body_rb = rigid_body_set.get(body.head.handle).unwrap();
+    let body_rb = rigid_bodies.get(body.head.handle).unwrap();
     body_rb.translation().x
 }
 
@@ -408,8 +391,8 @@ impl State for StateParams {
     }
 }
 
-fn make_reward_fn(mut scene_window: &mut Window, cam: kiss3d::camera::FirstPerson, rigid_body_set: RigidBodySet, collider_set: ColliderSet, joint_set: ImpulseJointSet, body: Body, body_visual: &mut RigidBodyVisual, body_radius: f32, num_frames: u32, gravity: rna::Vector2<f32>, sensor_rangers: Vec<Ranger>) -> impl FnMut(Policy) -> f32 {
-    move |behavior_policy| simulate(behavior_policy, &mut scene_window, &mut cam.clone(), rigid_body_set.clone(), collider_set.clone(), joint_set.clone(), &mut body.clone(), &mut body_visual.clone(), body_radius, num_frames, gravity, sensor_rangers.clone())
+fn make_reward_fn(mut scene_window: &mut Window, cam: kiss3d::camera::FirstPerson, rigid_bodies: RigidBodySet, colliders: ColliderSet, joint_set: ImpulseJointSet, body: Body, body_visual: &mut RigidBodyVisual, body_radius: f32, num_frames: u32, gravity: rna::Vector2<f32>, sensor_rangers: Vec<Ranger>) -> impl FnMut(Policy) -> f32 {
+    move |behavior_policy| simulate(behavior_policy, &mut scene_window, &mut cam.clone(), rigid_bodies.clone(), colliders.clone(), joint_set.clone(), &mut body.clone(), &mut body_visual.clone(), body_radius, num_frames, gravity, sensor_rangers.clone())
 }
 /*
 impl State for LegRhythmState {
@@ -420,29 +403,29 @@ impl State for LegRhythmState {
 }
 */
 
-fn make_cuboid_collider_and_handle(mut rigid_body_set: &mut RigidBodySet, collider_set: &mut ColliderSet, pos: rna::Vector2<f32>, ang: f32, hx: f32, hy: f32) -> RigidBodyHandle {
+fn make_cuboid_collider_and_handle(mut rigid_bodies: &mut RigidBodySet, colliders: &mut ColliderSet, pos: rna::Vector2<f32>, ang: f32, hx: f32, hy: f32) -> RigidBodyHandle {
     let body = RigidBodyBuilder::dynamic()
         .translation(pos)
         .rotation(ang)
         .build();
     let collider = ColliderBuilder::cuboid(hx, hy).restitution(0.7).build();
-    let handle = rigid_body_set.insert(body);
+    let handle = rigid_bodies.insert(body);
 
-    collider_set.insert_with_parent(collider, handle, &mut rigid_body_set);
+    colliders.insert_with_parent(collider, handle, &mut rigid_bodies);
 
     handle
 }
 
-fn make_leg(rigid_body_set: &mut RigidBodySet, collider_set: &mut ColliderSet, joint_set: &mut ImpulseJointSet, &start_pos: &rna::Vector2<f32>, &thigh_length: &f32, &calf_length: &f32, &knee_stiff: &f32, &knee_damp: &f32) -> Leg {
+fn make_leg(rigid_bodies: &mut RigidBodySet, colliders: &mut ColliderSet, joint_set: &mut ImpulseJointSet, &start_pos: &rna::Vector2<f32>, &thigh_length: &f32, &calf_length: &f32, &knee_stiff: &f32, &knee_damp: &f32) -> Leg {
     let knee_ang: f32 = PI/4.;
 
     let thigh_pos = rna::vector![0., calf_length + thigh_length + 1.] + start_pos;
     let calf_pos = rna::vector![0., calf_length - 1.] + start_pos;
 
-    let thigh_handle = make_cuboid_collider_and_handle(rigid_body_set, collider_set, thigh_pos, -knee_ang, 1., thigh_length);
-    let calf_handle = make_cuboid_collider_and_handle(rigid_body_set, collider_set, calf_pos, -knee_ang, 1., calf_length);
+    let thigh_handle = make_cuboid_collider_and_handle(rigid_bodies, colliders, thigh_pos, -knee_ang, 1., thigh_length);
+    let calf_handle = make_cuboid_collider_and_handle(rigid_bodies, colliders, calf_pos, -knee_ang, 1., calf_length);
 
-    let calf_rb = rigid_body_set.get_mut(calf_handle).unwrap();
+    let calf_rb = rigid_bodies.get_mut(calf_handle).unwrap();
     calf_rb.set_additional_mass(3. *calf_rb.mass(), true);
 
     let knee = RevoluteJointBuilder::new()
@@ -457,18 +440,18 @@ fn make_leg(rigid_body_set: &mut RigidBodySet, collider_set: &mut ColliderSet, j
         knee: Hinge{handle: knee_handle, stiff: knee_stiff, damp: knee_damp}}
 }
 
-fn make_body(mut rigid_body_set: &mut RigidBodySet, mut collider_set: &mut ColliderSet, mut joint_set: &mut ImpulseJointSet, &start_pos: &rna::Vector2<f32>, &radius: &f32, &thigh_length: &f32,  &calf_length: &f32, &joint_stiff: &f32, &joint_damp: &f32) -> Body {
+fn make_body(mut rigid_bodies: &mut RigidBodySet, mut colliders: &mut ColliderSet, mut joint_set: &mut ImpulseJointSet, &start_pos: &rna::Vector2<f32>, &radius: &f32, &thigh_length: &f32,  &calf_length: &f32, &joint_stiff: &f32, &joint_damp: &f32) -> Body {
     let head_rb = RigidBodyBuilder::dynamic()
         .translation(rna::vector![start_pos.x, 2. * thigh_length + 2. * calf_length + radius])
         .build();
     let head_collider = ColliderBuilder::ball(radius).restitution(0.7).build();
-    let head_handle = rigid_body_set.insert(head_rb);
-    collider_set.insert_with_parent(head_collider, head_handle, &mut rigid_body_set);
+    let head_handle = rigid_bodies.insert(head_rb);
+    colliders.insert_with_parent(head_collider, head_handle, &mut rigid_bodies);
 
     let head = Head{handle: head_handle, radius: radius};
 
-    let (leg1, leg2) = (make_leg(&mut rigid_body_set, &mut collider_set, &mut joint_set, &start_pos, &thigh_length, &calf_length, &joint_stiff, &joint_damp), 
-        make_leg(&mut rigid_body_set, &mut collider_set, &mut joint_set, &start_pos, &thigh_length, &calf_length, &joint_stiff, &joint_damp));
+    let (leg1, leg2) = (make_leg(&mut rigid_bodies, &mut colliders, &mut joint_set, &start_pos, &thigh_length, &calf_length, &joint_stiff, &joint_damp), 
+        make_leg(&mut rigid_bodies, &mut colliders, &mut joint_set, &start_pos, &thigh_length, &calf_length, &joint_stiff, &joint_damp));
 
     let (hip1_builder, hip2_builder) = (RevoluteJointBuilder::new()
         .local_anchor1(2.05*rna::point![radius.sqrt(), -radius.sqrt()])
@@ -490,14 +473,14 @@ fn make_body(mut rigid_body_set: &mut RigidBodySet, mut collider_set: &mut Colli
     body
 }
 
-fn draw_leg(scene_window: &mut Window, rigid_body_set: &RigidBodySet, leg: &mut Leg) {
-    let thigh_rb = rigid_body_set.get(leg.thigh.handle).unwrap();
+fn draw_leg(scene_window: &mut Window, rigid_bodies: &RigidBodySet, leg: &mut Leg) {
+    let thigh_rb = rigid_bodies.get(leg.thigh.handle).unwrap();
     let thigh_pos = kna::Point3::new(thigh_rb.translation().x, thigh_rb.translation().y, 0.);
     let thigh_ang = thigh_rb.rotation().to_polar().1;
     let thigh_top = kna::Point3::new(thigh_pos.x - leg.thigh.length * thigh_ang.sin(), thigh_pos.y + leg.thigh.length * thigh_ang.cos(), 0.);
     let thigh_bot = kna::Point3::new(thigh_pos.x + leg.thigh.length * thigh_ang.sin(), thigh_pos.y - leg.thigh.length * thigh_ang.cos(), 0.);
 
-    let calf_rb = rigid_body_set.get(leg.calf.handle).unwrap();
+    let calf_rb = rigid_bodies.get(leg.calf.handle).unwrap();
     let calf_pos = kna::Point3::new(calf_rb.translation().x, calf_rb.translation().y, 0.);
     let calf_ang = calf_rb.rotation().to_polar().1;
     let calf_top = kna::Point3::new(calf_pos.x - leg.calf.length * calf_ang.sin(), calf_pos.y + leg.calf.length * calf_ang.cos(), 0.);
@@ -509,8 +492,8 @@ fn draw_leg(scene_window: &mut Window, rigid_body_set: &RigidBodySet, leg: &mut 
     scene_window.draw_line(&calf_top, &calf_bot, &color);
 }
 
-fn make_head_visual(scene_window: &mut Window, rigid_body_set: &mut RigidBodySet, body_handle: RigidBodyHandle, body_radius: f32) -> scene::SceneNode {
-    let ball_rb: &mut RigidBody = rigid_body_set.get_mut(body_handle).unwrap();
+fn make_head_visual(scene_window: &mut Window, rigid_bodies: &mut RigidBodySet, body_handle: RigidBodyHandle, body_radius: f32) -> scene::SceneNode {
+    let ball_rb: &mut RigidBody = rigid_bodies.get_mut(body_handle).unwrap();
     let ball_center = kna::Translation3::new(ball_rb.translation().x, ball_rb.translation().y, 0.);
 
     let mut ball = scene_window.add_sphere(body_radius);
@@ -519,8 +502,8 @@ fn make_head_visual(scene_window: &mut Window, rigid_body_set: &mut RigidBodySet
     ball
 }
 
-fn update_head_visual(rigid_body_set: &RigidBodySet, body_handle: RigidBodyHandle, mut body_visual: scene::SceneNode) -> scene::SceneNode {
-    let body_rb = rigid_body_set.get(body_handle).unwrap();
+fn update_head_visual(rigid_bodies: &RigidBodySet, body_handle: RigidBodyHandle, mut body_visual: scene::SceneNode) -> scene::SceneNode {
+    let body_rb = rigid_bodies.get(body_handle).unwrap();
 
     let vis_x = body_visual.data().world_transformation().translation.x;
     let vis_y = body_visual.data().world_transformation().translation.y;
@@ -529,20 +512,20 @@ fn update_head_visual(rigid_body_set: &RigidBodySet, body_handle: RigidBodyHandl
     body_visual
 }
 
-fn draw_body(scene_window: &mut Window, rigid_body_set: &RigidBodySet, body: &mut Body, visual: &mut RigidBodyVisual) {
-    update_head_visual(rigid_body_set, body.head.handle, visual.node.clone());
-    draw_leg(scene_window, rigid_body_set, &mut body.legs.0);
-    draw_leg(scene_window, rigid_body_set, &mut body.legs.1);
+fn draw_body(scene_window: &mut Window, rigid_bodies: &RigidBodySet, body: &mut Body, visual: &mut RigidBodyVisual) {
+    update_head_visual(rigid_bodies, body.head.handle, visual.node.clone());
+    draw_leg(scene_window, rigid_bodies, &mut body.legs.0);
+    draw_leg(scene_window, rigid_bodies, &mut body.legs.1);
 }
 
 fn main() {
-    let mut rigid_body_set = RigidBodySet::new();
-    let mut collider_set = ColliderSet::new();
+    let mut rigid_bodies = RigidBodySet::new();
+    let mut colliders = ColliderSet::new();
     let mut joint_set = ImpulseJointSet::new();
 
     /* Create the ground. */
     let collider = ColliderBuilder::cuboid(10000.0, 1.).build(); 
-    collider_set.insert(collider);
+    colliders.insert(collider);
 
     /* Create the leg parts. */
     let thigh_length = 7.5;
@@ -560,8 +543,8 @@ fn main() {
         .translation(rna::vector![start_pos.x, 2. * thigh_length + 2. * calf_length + head_height_offset + start_height_offset + head_radius])
         .build();
     let head_collider = ColliderBuilder::ball(head_radius).restitution(0.7).build();
-    let head_handle = rigid_body_set.insert(head_rb.clone());
-    collider_set.insert_with_parent(head_collider, head_handle, &mut rigid_body_set);
+    let head_handle = rigid_bodies.insert(head_rb.clone());
+    colliders.insert_with_parent(head_collider, head_handle, &mut rigid_bodies);
 
     /* Create the sensors. */
     let local_front_sensor_pos = point![1.3*head_radius, 0.];
@@ -589,9 +572,9 @@ fn main() {
     let mut scene_window = Window::new_with_size("scene_window", res_x, res_y);
     let mut cam = kiss3d::camera::FirstPerson::new(kna::Point3::new(0., 0., 200.), kna::Point3::new(0., 0., 0.));
 
-    let head_node = make_head_visual(&mut scene_window, &mut rigid_body_set, head_handle, head_radius);
+    let head_node = make_head_visual(&mut scene_window, &mut rigid_bodies, head_handle, head_radius);
 
-    let mut body = make_body(&mut rigid_body_set, &mut collider_set, &mut joint_set, &start_pos, &head_radius, &thigh_length, &calf_length, &knee_stiff, &knee_damp);
+    let mut body = make_body(&mut rigid_bodies, &mut colliders, &mut joint_set, &start_pos, &head_radius, &thigh_length, &calf_length, &knee_stiff, &knee_damp);
 
     let mut head_visual = RigidBodyVisual{handle: body.head.handle, node: head_node};
 
@@ -605,5 +588,5 @@ fn main() {
     let policy = Policy{kind: PolicyKind::BalloonBotPolicy, inputs: BalloonBotSensorValues::new_zeros(), outputs: ActuatorValues{vec: vec![0.]}, parameters: BalloonBotActuatorValues::new_zeros(PI/100.)};
 
     /* Create other structures necessary for the simulation. */
-    simulate(policy, &mut scene_window, &mut cam, rigid_body_set, collider_set, joint_set, &mut body, &mut head_visual, head_radius, 10000, rna::vector![0.0, -98.1], sensor_rangers);
+    simulate(policy, &mut scene_window, &mut cam, rigid_bodies, colliders, joint_set, &mut body, &mut head_visual, head_radius, 10000, rna::vector![0.0, -98.1], sensor_rangers);
 }
